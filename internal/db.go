@@ -50,7 +50,6 @@ func NewDatabase(driver, connection, table string) (*Database, error) {
 										topicId UUID NOT NULL REFERENCES %s_topics ON DELETE RESTRICT,
 										topic STRING NOT NULL,
 										data STRING NOT NULL,
-										channel STRING NOT NULL,
 										version INT64 NOT NULL,
 										timeStamp INT64 NOT NULL)`,
 		table, table,
@@ -63,7 +62,7 @@ func NewDatabase(driver, connection, table string) (*Database, error) {
 	return &Database{db: db, table: table}, nil
 }
 
-func (d *Database) CreateEvent(eventType, channel, topicId string, data []byte, expectedVersion int64) (*types.Event, error) {
+func (d *Database) CreateEvent(eventType, topicId string, data []byte, expectedVersion int64) (*types.Event, error) {
 	timeStamp := time.Now().UTC().Unix()
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -112,8 +111,8 @@ func (d *Database) CreateEvent(eventType, channel, topicId string, data []byte, 
 	}
 
 	command = fmt.Sprintf(
-		`INSERT INTO %s (id, type, topicId, topic, data, channel, version, timeStamp)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)`,
+		`INSERT INTO %s (id, type, topicId, topic, data, version, timeStamp)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		d.table,
 	)
 
@@ -127,7 +126,6 @@ func (d *Database) CreateEvent(eventType, channel, topicId string, data []byte, 
 		Id:        id,
 		Type:      eventType,
 		Topic:     topic,
-		Channel:   channel,
 		Data:      data,
 		TimeStamp: timeStamp}, nil
 }
@@ -214,5 +212,5 @@ func (d *Database) CreateTopicIfNotExists(topic string) (string, int64, error) {
 }
 
 func (d *Database) Close() error {
-	d.db.Close()
+	return d.db.Close()
 }

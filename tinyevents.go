@@ -14,8 +14,8 @@ type EventStore interface {
 	TopicID() string
 	Version() int64
 	GetEvents() ([]Event, int64, error)
-	CreateEvent(eventType, channel string, data []byte) (*Event, error)
-	CreateRecordedEvent(eventType, channel string, data []byte, expectedVersion int64) (*Event, error)
+	CreateEvent(eventType string, data []byte) (*Event, error)
+	CreateRecordedEvent(eventType string, data []byte, expectedVersion int64) (*Event, error)
 	Close() error
 }
 
@@ -77,8 +77,8 @@ func (es *eventStore) Version() int64 {
 	return es.version
 }
 
-func (es *eventStore) CreateEvent(eventType, channel string, data []byte) (*Event, error) {
-	event, err := es.db.CreateEvent(eventType, channel, es.topicID, data, es.version)
+func (es *eventStore) CreateEvent(eventType string, data []byte) (*Event, error) {
+	event, err := es.db.CreateEvent(eventType, es.topicID, data, es.version)
 	if err != nil {
 		return nil, err
 	}
@@ -90,8 +90,8 @@ func (es *eventStore) CreateEvent(eventType, channel string, data []byte) (*Even
 	return event, nil
 }
 
-func (es *eventStore) CreateRecordedEvent(eventType, channel string, data []byte, expectedVersion int64) (*Event, error) {
-	event, err := es.db.CreateEvent(eventType, channel, es.topicID, data, expectedVersion)
+func (es *eventStore) CreateRecordedEvent(eventType string, data []byte, expectedVersion int64) (*Event, error) {
+	event, err := es.db.CreateEvent(eventType, es.topicID, data, expectedVersion)
 	if err != nil {
 		return nil, err
 	}
