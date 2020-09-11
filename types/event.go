@@ -5,16 +5,16 @@ import (
 )
 
 type Event struct {
-	Id            string `json:"id,omitempty"`
-	Type          string `json:"type,omitempty"`
-	AggregateType string `json:"aggregateId,omitempty"`
-	AggregateId   string `json:"aggregateType,omitempty"`
-	Data          []byte `json:"data"`
-	Channel       string `json:"channel,omitempty"`
+	Id        string `json:"id,omitempty"`
+	Type      string `json:"type,omitempty"`
+	Topic     string `json:"topic,omitempty"`
+	Channel   string `json:"channel,omitempty"`
+	Data      []byte `json:"data"`
+	TimeStamp int64  `json:"timeStamp"`
 }
 
 type RecordedEvent struct {
 	Event
-	Version   int64 `json:"version,omitempty"`
-	TimeStamp int64 `json:"timeStamp"`
+	TopicId string `json:"topicId,omitempty"`
+	Version int64  `json:"version,omitempty"`
 }

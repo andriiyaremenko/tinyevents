@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/andriiyaremenko/tinyevents/types"
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 )
 
@@ -14,12 +15,12 @@ type ErrConcurrencyConflict struct {
 	Version         int64
 	ExpectedVersion int64
 	EventType       string
-	AggregateType   string
+	EventTopic      string
 }
 
 func (err *ErrConcurrencyConflict) Error() string {
-	return fmt.Sprintf("met concurrency conflict: event %s aggregate %s version %d, expected version %d",
-		err.EventType, err.AggregateType, err.Version, err.ExpectedVersion)
+	return fmt.Sprintf("met concurrency conflict: event %s topic %s version %d, expected version %d",
+		err.EventType, err.EventTopic, err.Version, err.ExpectedVersion)
 }
 
 type Database struct {
@@ -35,24 +36,24 @@ func NewDatabase(driver, connection, table string) (*Database, error) {
 	}
 
 	command := fmt.Sprintf(
-		`CREATE TABLE IF NOT EXISTS %s (id STRING PRIMARY KEY,
-										type STRING NOT NULL,
-										aggregateId STRING NOT NULL,
-										aggregateType STRING NOT NULL,
-										data STRING NOT NULL,
-										channel STRING NOT NULL,
-										version INT64 NOT NULL,
-										timeStamp INT64 NOT NULL)`,
+		"CREATE TABLE IF NOT EXISTS %s_topics (id UUID PRIMARY KEY, topic STRING NOT NULL, version INT64 NOT NULL)",
 		table,
 	)
 
-	if _, err = db.Exec(command); err != nil {
+	if _, err := db.Exec(command); err != nil {
 		return nil, errors.Wrap(err, "failed to initialize tables")
 	}
 
 	command = fmt.Sprintf(
-		`CREATE TABLE IF NOT EXISTS %s_versions (aggregateType STRING PRIMARY KEY, version INT64 NOT NULL)`,
-		table,
+		`CREATE TABLE IF NOT EXISTS %s (id UUID PRIMARY KEY,
+										type STRING NOT NULL,
+										topicId UUID NOT NULL REFERENCES %s_topics ON DELETE RESTRICT,
+										topic STRING NOT NULL,
+										data STRING NOT NULL,
+										channel STRING NOT NULL,
+										version INT64 NOT NULL,
+										timeStamp INT64 NOT NULL)`,
+		table, table,
 	)
 
 	if _, err = db.Exec(command); err != nil {
@@ -62,65 +63,82 @@ func NewDatabase(driver, connection, table string) (*Database, error) {
 	return &Database{db: db, table: table}, nil
 }
 
-func (d *Database) CreateEvent(event types.Event, expectedVersion int64) error {
+func (d *Database) CreateEvent(eventType, channel, topicId string, data []byte, expectedVersion int64) (*types.Event, error) {
+	timeStamp := time.Now().UTC().Unix()
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	query := fmt.Sprintf(
-		`SELECT version FROM %s_versions WHERE aggregateType = %s`,
-		d.table, event.AggregateType,
+		"SELECT topic, version FROM %s_topics WHERE id = %s",
+		d.table, topicId,
 	)
 
 	rows, err := d.db.Query(query)
 	if err != nil {
-		return errors.Wrap(err, "failed to read events versions")
+		return nil, errors.Wrap(err, "failed to read topic")
 	}
 
 	defer rows.Close()
 
+	var topic string
+	found := false
+
 	for rows.Next() {
 		var version int64
 
-		if err := rows.Scan(&version); err != nil {
-			return errors.Wrap(err, "failed to read events versions")
+		if err := rows.Scan(&topic, &version); err != nil {
+			return nil, errors.Wrap(err, "failed to read topic")
 		}
 
 		if version != expectedVersion {
-			return &ErrConcurrencyConflict{version, expectedVersion, event.Type, event.AggregateType}
+			return nil, &ErrConcurrencyConflict{version, expectedVersion, eventType, topic}
 		}
+
+		found = true
 	}
 
+	if !found {
+		return nil, errors.Errorf("critical: topic %s not found", topicId)
+	}
+
+	version := expectedVersion + 1
 	command := fmt.Sprintf(
-		`UPDATE %s_versions SET version = $1 WHERE aggregateType = $2`,
+		"UPDATE %s_topics SET version = $1 WHERE id = $2",
 		d.table,
 	)
 
-	_, err = d.db.Exec(command, event.AggregateType, expectedVersion+1)
+	if _, err = d.db.Exec(command, topicId, version); err != nil {
+		return nil, errors.Wrap(err, "failed to update topic version")
+	}
 
 	command = fmt.Sprintf(
-		`INSERT INTO %s (id, type, aggregateId, aggregateType, data, channel, version, timeStamp)
+		`INSERT INTO %s (id, type, topicId, topic, data, channel, version, timeStamp)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $7)`,
 		d.table,
 	)
 
-	_, err = d.db.Exec(command,
-		event.Id, event.Type, event.AggregateId, event.AggregateType, string(event.Data),
-		expectedVersion+1, time.Now().UTC().Unix())
+	id := uuid.New().String()
 
-	if err != nil {
-		return errors.Wrap(err, "failed to create event")
+	if _, err = d.db.Exec(command, id, eventType, topicId, topic, string(data), version, timeStamp); err != nil {
+		return nil, errors.Wrap(err, "failed to create event")
 	}
 
-	return nil
+	return &types.Event{
+		Id:        id,
+		Type:      eventType,
+		Topic:     topic,
+		Channel:   channel,
+		Data:      data,
+		TimeStamp: timeStamp}, nil
 }
 
-func (d *Database) GetEvents(aggregateType string) ([]types.Event, int64, error) {
+func (d *Database) GetEvents(topic string) ([]types.Event, int64, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	query := fmt.Sprintf(
-		`SELECT * FROM %s WHERE aggregateType = %s`,
-		d.table, aggregateType,
+		"SELECT * FROM %s WHERE topic = %s",
+		d.table, topic,
 	)
 
 	rows, err := d.db.Query(query)
@@ -136,7 +154,7 @@ func (d *Database) GetEvents(aggregateType string) ([]types.Event, int64, error)
 	for rows.Next() {
 		event := new(types.RecordedEvent)
 		var data string
-		err := rows.Scan(event.Id, event.Type, event.AggregateId, event.AggregateType, &data, event.Version, event.TimeStamp)
+		err := rows.Scan(event.Id, event.Type, event.TopicId, event.Topic, &data, event.Version, event.TimeStamp)
 
 		if err != nil {
 			return nil, 0, errors.Wrap(err, "failed to read events")
@@ -151,4 +169,46 @@ func (d *Database) GetEvents(aggregateType string) ([]types.Event, int64, error)
 	}
 
 	return events, version, nil
+}
+
+func (d *Database) CreateTopicIfNotExists(topic string) (string, int64, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	query := fmt.Sprintf(
+		"SELECT id, version FROM %s_topics WHERE topic = %s",
+		d.table, topic,
+	)
+
+	rows, err := d.db.Query(query)
+
+	if err != nil {
+		return "", 0, errors.Wrap(err, "failed to read topic")
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var id string
+		var version int64
+
+		if err := rows.Scan(&id, &version); err != nil {
+			return "", 0, errors.Wrap(err, "failed to read topic")
+		}
+
+		return id, version, nil
+	}
+
+	command := fmt.Sprintf(
+		"INSERT INTO %s (id, topic, version) VALUES ($1, $2, $3)",
+		d.table,
+	)
+
+	id := uuid.New().String()
+
+	if _, err := d.db.Exec(command, id, topic, 0); err != nil {
+		return "", 0, errors.Wrap(err, "failed to create new topic")
+	}
+
+	return id, 0, nil
 }

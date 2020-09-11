@@ -1,6 +1,8 @@
 package tinyevents
 
 import (
+	"sync"
+
 	"github.com/andriiyaremenko/tinyevents/internal"
 	"github.com/andriiyaremenko/tinyevents/types"
 )
@@ -8,33 +10,98 @@ import (
 type Event = types.Event
 
 type EventStore interface {
-	CreateEvent(event Event, expectedVersion int64) error
-	GetEvents(aggregateType string) ([]Event, int64, error)
+	Topic() string
+	TopicID() string
+	Version() int64
+	GetEvents() ([]Event, int64, error)
+	CreateEvent(eventType, channel string, data []byte) (*Event, error)
+	CreateRecordedEvent(eventType, channel string, data []byte, expectedVersion int64) (*Event, error)
 }
 
-func NewEventStore(dbDriver, conn, table string, publish chan<- Event) (EventStore, error) {
+func NewEventStoreConstructor(dbDriver, conn, table string) func(string) (EventStore, error) {
+	return func(topic string) (EventStore, error) {
+		db, err := internal.NewDatabase(dbDriver, conn, table)
+		if err != nil {
+			return nil, err
+		}
+
+		topicID, version, err := db.CreateTopicIfNotExists(topic)
+		if err != nil {
+			return nil, err
+		}
+
+		return &eventStore{
+			topicID: topicID,
+			topic:   topic,
+			version: version,
+			db:      db}, nil
+	}
+}
+
+func NewEventStore(topic, dbDriver, conn, table string) (EventStore, error) {
 	db, err := internal.NewDatabase(dbDriver, conn, table)
 	if err != nil {
 		return nil, err
 	}
 
-	return &eventStore{db, publish}, nil
+	topicID, version, err := db.CreateTopicIfNotExists(topic)
+	if err != nil {
+		return nil, err
+	}
+
+	return &eventStore{
+		topicID: topicID,
+		topic:   topic,
+		version: version,
+		db:      db}, nil
 }
 
 type eventStore struct {
+	mu sync.Mutex
+
+	topicID string
+	topic   string
+	version int64
 	db      *internal.Database
-	publish chan<- Event
 }
 
-func (es *eventStore) CreateEvent(event Event, expectedVersion int64) error {
-	if err := es.db.CreateEvent(event, expectedVersion); err != nil {
-		return err
+func (es *eventStore) Topic() string {
+	return es.topic
+}
+func (es *eventStore) TopicID() string {
+	return es.topicID
+}
+
+func (es *eventStore) Version() int64 {
+	return es.version
+}
+
+func (es *eventStore) CreateEvent(eventType, channel string, data []byte) (*Event, error) {
+	event, err := es.db.CreateEvent(eventType, channel, es.topicID, data, es.version)
+	if err != nil {
+		return nil, err
 	}
 
-	es.publish <- event
-	return nil
+	es.mu.Lock()
+	es.version++
+	es.mu.Unlock()
+
+	return event, nil
 }
 
-func (es *eventStore) GetEvents(aggregateType string) ([]Event, int64, error) {
-	return es.db.GetEvents(aggregateType)
+func (es *eventStore) CreateRecordedEvent(eventType, channel string, data []byte, expectedVersion int64) (*Event, error) {
+	event, err := es.db.CreateEvent(eventType, channel, es.topicID, data, expectedVersion)
+	if err != nil {
+		return nil, err
+	}
+
+	es.mu.Lock()
+	es.version++
+	es.mu.Unlock()
+
+	return event, nil
+}
+
+func (es *eventStore) GetEvents() ([]Event, int64, error) {
+	return es.db.GetEvents(es.topicID)
 }
