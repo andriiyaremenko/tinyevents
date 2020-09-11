@@ -212,3 +212,7 @@ func (d *Database) CreateTopicIfNotExists(topic string) (string, int64, error) {
 
 	return id, 0, nil
 }
+
+func (d *Database) Close() error {
+	d.db.Close()
+}

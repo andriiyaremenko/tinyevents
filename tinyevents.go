@@ -16,6 +16,7 @@ type EventStore interface {
 	GetEvents() ([]Event, int64, error)
 	CreateEvent(eventType, channel string, data []byte) (*Event, error)
 	CreateRecordedEvent(eventType, channel string, data []byte, expectedVersion int64) (*Event, error)
+	Close() error
 }
 
 func NewEventStoreConstructor(dbDriver, conn, table string) func(string) (EventStore, error) {
@@ -104,4 +105,8 @@ func (es *eventStore) CreateRecordedEvent(eventType, channel string, data []byte
 
 func (es *eventStore) GetEvents() ([]Event, int64, error) {
 	return es.db.GetEvents(es.topicID)
+}
+
+func (es *eventStore) Close() error {
+	return es.db.Close()
 }
