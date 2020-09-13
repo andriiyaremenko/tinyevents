@@ -102,7 +102,7 @@ func (d *Database) CreateEvent(eventType, topicId string, data []byte, expectedV
 
 	version := expectedVersion + 1
 	command := fmt.Sprintf(
-		"UPDATE %s_topics SET version = $1 WHERE id = $2",
+		"UPDATE %s_topics SET version = $2 WHERE id = $1",
 		d.table,
 	)
 
