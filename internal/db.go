@@ -152,7 +152,7 @@ func (d *Database) GetEvents(topicID string) ([]types.Event, int64, error) {
 	for rows.Next() {
 		event := new(types.RecordedEvent)
 		var data string
-		err := rows.Scan(event.Id, event.Type, event.TopicId, event.Topic, &data, event.Version, event.TimeStamp)
+		err := rows.Scan(&event.Id, &event.Type, &event.TopicId, &event.Topic, &data, &event.Version, &event.TimeStamp)
 
 		if err != nil {
 			return nil, 0, errors.Wrap(err, "failed to read events")
