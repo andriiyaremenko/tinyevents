@@ -198,7 +198,7 @@ func (d *Database) CreateTopicIfNotExists(topic string) (string, int64, error) {
 	}
 
 	command := fmt.Sprintf(
-		"INSERT INTO %s (id, topic, version) VALUES ($1, $2, $3)",
+		"INSERT INTO %s_topics (id, topic, version) VALUES ($1, $2, $3)",
 		d.table,
 	)
 
