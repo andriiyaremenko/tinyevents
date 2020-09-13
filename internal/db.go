@@ -68,11 +68,11 @@ func (d *Database) CreateEvent(eventType, topicId string, data []byte, expectedV
 	defer d.mu.Unlock()
 
 	query := fmt.Sprintf(
-		"SELECT topic, version FROM %s_topics WHERE id = %s",
-		d.table, topicId,
+		"SELECT topic, version FROM %s_topics WHERE id = $1",
+		d.table,
 	)
 
-	rows, err := d.db.Query(query)
+	rows, err := d.db.Query(query, topicId)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read topic")
 	}
@@ -135,11 +135,11 @@ func (d *Database) GetEvents(topic string) ([]types.Event, int64, error) {
 	defer d.mu.Unlock()
 
 	query := fmt.Sprintf(
-		"SELECT * FROM %s WHERE topic = %s",
-		d.table, topic,
+		"SELECT * FROM %s WHERE topic = $1",
+		d.table,
 	)
 
-	rows, err := d.db.Query(query)
+	rows, err := d.db.Query(query, topic)
 	if err != nil {
 		return nil, 0, errors.Wrap(err, "failed to read events")
 	}
@@ -174,11 +174,11 @@ func (d *Database) CreateTopicIfNotExists(topic string) (string, int64, error) {
 	defer d.mu.Unlock()
 
 	query := fmt.Sprintf(
-		"SELECT id, version FROM %s_topics WHERE topic = %s",
-		d.table, topic,
+		"SELECT id, version FROM %s_topics WHERE topic = $1",
+		d.table,
 	)
 
-	rows, err := d.db.Query(query)
+	rows, err := d.db.Query(query, topic)
 
 	if err != nil {
 		return "", 0, errors.Wrap(err, "failed to read topic")
