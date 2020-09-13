@@ -130,16 +130,16 @@ func (d *Database) CreateEvent(eventType, topicId string, data []byte, expectedV
 		TimeStamp: timeStamp}, nil
 }
 
-func (d *Database) GetEvents(topic string) ([]types.Event, int64, error) {
+func (d *Database) GetEvents(topicID string) ([]types.Event, int64, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	query := fmt.Sprintf(
-		"SELECT * FROM %s WHERE id = $1",
+		"SELECT * FROM %s WHERE topicId = $1",
 		d.table,
 	)
 
-	rows, err := d.db.Query(query, topic)
+	rows, err := d.db.Query(query, topicID)
 	if err != nil {
 		return nil, 0, errors.Wrap(err, "failed to read events")
 	}
