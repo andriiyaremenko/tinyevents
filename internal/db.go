@@ -135,7 +135,7 @@ func (d *Database) GetEvents(topicID string) ([]types.Event, int64, error) {
 	defer d.mu.Unlock()
 
 	query := fmt.Sprintf(
-		"SELECT * FROM %s WHERE topicId = $1",
+		"SELECT * FROM %s WHERE topicId = $1 ORDER BY timeStamp",
 		d.table,
 	)
 
