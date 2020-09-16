@@ -80,6 +80,7 @@ func (es *eventStore) Version() int64 {
 func (es *eventStore) CreateEvent(eventType string, data []byte) (*Event, error) {
 	es.mu.Lock()
 	defer es.mu.Unlock()
+
 	event, err := es.db.CreateEvent(eventType, es.topicID, data, es.version)
 	if err != nil {
 		return nil, err
