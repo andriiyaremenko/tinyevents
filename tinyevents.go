@@ -5,6 +5,7 @@ import (
 
 	"github.com/andriiyaremenko/tinyevents/internal"
 	"github.com/andriiyaremenko/tinyevents/types"
+	"github.com/pkg/errors"
 )
 
 type Event = types.Event
@@ -12,8 +13,9 @@ type Event = types.Event
 type EventStore interface {
 	Topic() string
 	TopicID() string
-	Version() int64
+	Version() (int64, error)
 	GetEvents() ([]Event, int64, error)
+	GetEventsFrom(int64) ([]Event, int64, error)
 	CreateEvent(eventType string, data []byte) (*Event, error)
 	CreateRecordedEvent(eventType string, data []byte, expectedVersion int64) (*Event, error)
 	Close() error
@@ -26,7 +28,7 @@ func NewEventStoreConstructor(dbDriver, conn, table string) func(string) (EventS
 			return nil, err
 		}
 
-		topicID, version, err := db.CreateTopicIfNotExists(topic)
+		topicID, _, err := db.CreateTopicIfNotExists(topic)
 		if err != nil {
 			return nil, err
 		}
@@ -34,7 +36,6 @@ func NewEventStoreConstructor(dbDriver, conn, table string) func(string) (EventS
 		return &eventStore{
 			topicID: topicID,
 			topic:   topic,
-			version: version,
 			db:      db}, nil
 	}
 }
@@ -45,7 +46,7 @@ func NewEventStore(topic, dbDriver, conn, table string) (EventStore, error) {
 		return nil, err
 	}
 
-	topicID, version, err := db.CreateTopicIfNotExists(topic)
+	topicID, _, err := db.CreateTopicIfNotExists(topic)
 	if err != nil {
 		return nil, err
 	}
@@ -53,7 +54,6 @@ func NewEventStore(topic, dbDriver, conn, table string) (EventStore, error) {
 	return &eventStore{
 		topicID: topicID,
 		topic:   topic,
-		version: version,
 		db:      db}, nil
 }
 
@@ -62,7 +62,6 @@ type eventStore struct {
 
 	topicID string
 	topic   string
-	version int64
 	db      *internal.Database
 }
 
@@ -73,39 +72,48 @@ func (es *eventStore) TopicID() string {
 	return es.topicID
 }
 
-func (es *eventStore) Version() int64 {
-	return es.version
+func (es *eventStore) Version() (int64, error) {
+	v, err := es.db.Version(es.topicID)
+	if err != nil {
+		return 0, errors.Wrapf(err, "failed to read EventStore %s version", es.topic)
+	}
+
+	return v, nil
 }
 
 func (es *eventStore) CreateEvent(eventType string, data []byte) (*Event, error) {
 	es.mu.Lock()
 	defer es.mu.Unlock()
 
-	event, err := es.db.CreateEvent(eventType, es.topicID, data, es.version)
+	version, err := es.Version()
 	if err != nil {
 		return nil, err
 	}
 
-	es.version++
-
-	return event, nil
+	return es.CreateRecordedEvent(eventType, data, version)
 }
 
 func (es *eventStore) CreateRecordedEvent(eventType string, data []byte, expectedVersion int64) (*Event, error) {
 	event, err := es.db.CreateEvent(eventType, es.topicID, data, expectedVersion)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrapf(err, "EventStore %s: failed to create event %d", expectedVersion, es.topic)
 	}
-
-	es.mu.Lock()
-	es.version++
-	es.mu.Unlock()
 
 	return event, nil
 }
 
 func (es *eventStore) GetEvents() ([]Event, int64, error) {
-	return es.db.GetEvents(es.topicID)
+	return es.GetEventsFrom(0)
+}
+
+func (es *eventStore) GetEventsFrom(version int64) ([]Event, int64, error) {
+	events, v, err := es.db.GetEvents(es.topicID, version)
+	if err != nil {
+		return nil, 0, errors.Wrapf(err,
+			"EventStore %s: failed to read events starting from version %d", es.topic, version)
+	}
+
+	return events, v, nil
 }
 
 func (es *eventStore) Close() error {

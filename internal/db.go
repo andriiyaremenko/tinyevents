@@ -41,13 +41,13 @@ func NewDatabase(driver, connection, table string) (*Database, error) {
 	)
 
 	if _, err := db.Exec(command); err != nil {
-		return nil, errors.Wrap(err, "failed to initialize tables")
+		return nil, errors.Wrapf(err, "failed to initialize %s_topics table", table)
 	}
 
 	command = fmt.Sprintf(
 		`CREATE TABLE IF NOT EXISTS %s (id UUID PRIMARY KEY,
 										type STRING NOT NULL,
-										topicId UUID NOT NULL REFERENCES %s_topics ON DELETE RESTRICT,
+										topicID UUID NOT NULL REFERENCES %s_topics ON DELETE RESTRICT,
 										topic STRING NOT NULL,
 										data STRING NOT NULL,
 										version INT64 NOT NULL,
@@ -56,13 +56,42 @@ func NewDatabase(driver, connection, table string) (*Database, error) {
 	)
 
 	if _, err = db.Exec(command); err != nil {
-		return nil, errors.Wrap(err, "failed to initialize tables")
+		return nil, errors.Wrapf(err, "failed to initialize %s table", table)
 	}
 
 	return &Database{db: db, table: table}, nil
 }
 
-func (d *Database) CreateEvent(eventType, topicId string, data []byte, expectedVersion int64) (*types.Event, error) {
+func (d *Database) Version(topicID string) (int64, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	query := fmt.Sprintf(
+		"SELECT version FROM %s_topics WHERE topicID = $1",
+		d.table,
+	)
+
+	rows, err := d.db.Query(query, topicID)
+	if err != nil {
+		return 0, errors.Wrap(err, "failed to query topic")
+	}
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var version int64
+
+		if err := rows.Scan(&version); err != nil {
+			return 0, errors.Wrap(err, "failed to read topic")
+		}
+
+		return version, nil
+	}
+
+	return 0, nil
+}
+
+func (d *Database) CreateEvent(eventType, topicID string, data []byte, expectedVersion int64) (*types.Event, error) {
 	timeStamp := time.Now().UTC().Unix()
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -72,9 +101,9 @@ func (d *Database) CreateEvent(eventType, topicId string, data []byte, expectedV
 		d.table,
 	)
 
-	rows, err := d.db.Query(query, topicId)
+	rows, err := d.db.Query(query, topicID)
 	if err != nil {
-		return nil, errors.Wrap(err, "failed to read topic")
+		return nil, errors.Wrap(err, "failed to query topic")
 	}
 
 	defer rows.Close()
@@ -97,7 +126,7 @@ func (d *Database) CreateEvent(eventType, topicId string, data []byte, expectedV
 	}
 
 	if !found {
-		return nil, errors.Errorf("critical: topic %s not found", topicId)
+		return nil, errors.Errorf("critical: topic %s not found", topicID)
 	}
 
 	version := expectedVersion + 1
@@ -106,19 +135,19 @@ func (d *Database) CreateEvent(eventType, topicId string, data []byte, expectedV
 		d.table,
 	)
 
-	if _, err = d.db.Exec(command, topicId, version); err != nil {
+	if _, err = d.db.Exec(command, topicID, version); err != nil {
 		return nil, errors.Wrap(err, "failed to update topic version")
 	}
 
 	command = fmt.Sprintf(
-		`INSERT INTO %s (id, type, topicId, topic, data, version, timeStamp)
+		`INSERT INTO %s (id, type, topicID, topic, data, version, timeStamp)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
 		d.table,
 	)
 
 	id := uuid.New().String()
 
-	if _, err = d.db.Exec(command, id, eventType, topicId, topic, string(data), version, timeStamp); err != nil {
+	if _, err = d.db.Exec(command, id, eventType, topicID, topic, string(data), version, timeStamp); err != nil {
 		return nil, errors.Wrap(err, "failed to create event")
 	}
 
@@ -130,18 +159,18 @@ func (d *Database) CreateEvent(eventType, topicId string, data []byte, expectedV
 		TimeStamp: timeStamp}, nil
 }
 
-func (d *Database) GetEvents(topicID string) ([]types.Event, int64, error) {
+func (d *Database) GetEvents(topicID string, from int64) ([]types.Event, int64, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	query := fmt.Sprintf(
-		"SELECT * FROM %s WHERE topicId = $1 ORDER BY timeStamp",
+		"SELECT * FROM %s WHERE topicID = $1 and version >= $2 ORDER BY version",
 		d.table,
 	)
 
-	rows, err := d.db.Query(query, topicID)
+	rows, err := d.db.Query(query, topicID, from)
 	if err != nil {
-		return nil, 0, errors.Wrap(err, "failed to read events")
+		return nil, 0, errors.Wrap(err, "failed to query events")
 	}
 
 	defer rows.Close()
@@ -181,7 +210,7 @@ func (d *Database) CreateTopicIfNotExists(topic string) (string, int64, error) {
 	rows, err := d.db.Query(query, topic)
 
 	if err != nil {
-		return "", 0, errors.Wrap(err, "failed to read topic")
+		return "", 0, errors.Wrap(err, "failed to query topic")
 	}
 
 	defer rows.Close()
