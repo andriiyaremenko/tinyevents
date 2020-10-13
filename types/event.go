@@ -5,7 +5,7 @@ import (
 )
 
 type Event struct {
-	Id        string `json:"id,omitempty"`
+	ID        string `json:"id,omitempty"`
 	Type      string `json:"type,omitempty"`
 	Topic     string `json:"topic,omitempty"`
 	Data      []byte `json:"data"`
@@ -14,6 +14,6 @@ type Event struct {
 
 type RecordedEvent struct {
 	Event
-	TopicId string `json:"topicId,omitempty"`
+	TopicID string `json:"topicId,omitempty"`
 	Version int64  `json:"version,omitempty"`
 }

@@ -67,7 +67,7 @@ func (d *Database) Version(topicID string) (int64, error) {
 	defer d.mu.Unlock()
 
 	query := fmt.Sprintf(
-		"SELECT version FROM %s_topics WHERE topicID = $1",
+		"SELECT version FROM %s_topics WHERE id = $1",
 		d.table,
 	)
 
@@ -152,7 +152,7 @@ func (d *Database) CreateEvent(eventType, topicID string, data []byte, expectedV
 	}
 
 	return &types.Event{
-		Id:        id,
+		ID:        id,
 		Type:      eventType,
 		Topic:     topic,
 		Data:      data,
@@ -181,7 +181,7 @@ func (d *Database) GetEvents(topicID string, from int64) ([]types.Event, int64, 
 	for rows.Next() {
 		event := new(types.RecordedEvent)
 		var data string
-		err := rows.Scan(&event.Id, &event.Type, &event.TopicId, &event.Topic, &data, &event.Version, &event.TimeStamp)
+		err := rows.Scan(&event.ID, &event.Type, &event.TopicID, &event.Topic, &data, &event.Version, &event.TimeStamp)
 
 		if err != nil {
 			return nil, 0, errors.Wrap(err, "failed to read events")
