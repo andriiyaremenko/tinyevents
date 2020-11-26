@@ -6,15 +6,18 @@ import (
 )
 
 type Event = types.Event
+type EventType string
 
 type EventStore interface {
 	Topic() string
 	TopicID() string
 	Version() (int64, error)
-	GetEvents() ([]Event, int64, error)
-	GetEventsFrom(int64) ([]Event, int64, error)
-	CreateEvent(eventType string, data []byte) (*Event, error)
-	CreateRecordedEvent(eventType string, data []byte, expectedVersion int64) (*Event, error)
+	GetEvents(eventType EventType) ([]Event, int64, error)
+	GetEventsFrom(evenType EventType, version int64) ([]Event, int64, error)
+	GetAllEvents() ([]Event, int64, error)
+	GetAllEventsFrom(version int64) ([]Event, int64, error)
+	CreateEvent(eventType EventType, data []byte) (*Event, error)
+	CreateRecordedEvent(eventType EventType, data []byte, expectedVersion int64) (*Event, error)
 	Close() error
 }
 

@@ -159,7 +159,26 @@ func (d *Database) CreateEvent(eventType, topicID string, data []byte, expectedV
 		TimeStamp: timeStamp}, nil
 }
 
-func (d *Database) GetEvents(topicID string, from int64) ([]types.Event, int64, error) {
+func (d *Database) GetEvents(topicID string, eventType string, from int64) ([]types.Event, int64, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	query := fmt.Sprintf(
+		"SELECT * FROM %s WHERE topicID = $1 and type = $2 and version >= $3 ORDER BY version",
+		d.table,
+	)
+
+	rows, err := d.db.Query(query, topicID, eventType, from)
+	if err != nil {
+		return nil, 0, errors.Wrap(err, "failed to query events")
+	}
+
+	defer rows.Close()
+
+	return d.getEvents(rows)
+}
+
+func (d *Database) GetAllEvents(topicID string, from int64) ([]types.Event, int64, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -175,27 +194,7 @@ func (d *Database) GetEvents(topicID string, from int64) ([]types.Event, int64, 
 
 	defer rows.Close()
 
-	var events []types.Event
-	var version int64 = 0
-
-	for rows.Next() {
-		event := new(types.RecordedEvent)
-		var data string
-		err := rows.Scan(&event.ID, &event.Type, &event.TopicID, &event.Topic, &data, &event.Version, &event.TimeStamp)
-
-		if err != nil {
-			return nil, 0, errors.Wrap(err, "failed to read events")
-		}
-
-		event.Data = []byte(data)
-		events = append(events, event.Event)
-
-		if version < event.Version {
-			version = event.Version
-		}
-	}
-
-	return events, version, nil
+	return d.getEvents(rows)
 }
 
 func (d *Database) CreateTopicIfNotExists(topic string) (string, int64, error) {
@@ -242,4 +241,28 @@ func (d *Database) CreateTopicIfNotExists(topic string) (string, int64, error) {
 
 func (d *Database) Close() error {
 	return d.db.Close()
+}
+
+func (d *Database) getEvents(rows *sql.Rows) ([]types.Event, int64, error) {
+	var events []types.Event
+	var version int64 = 0
+
+	for rows.Next() {
+		event := new(types.RecordedEvent)
+		var data string
+		err := rows.Scan(&event.ID, &event.Type, &event.TopicID, &event.Topic, &data, &event.Version, &event.TimeStamp)
+
+		if err != nil {
+			return nil, 0, errors.Wrap(err, "failed to read events")
+		}
+
+		event.Data = []byte(data)
+		events = append(events, event.Event)
+
+		if version < event.Version {
+			version = event.Version
+		}
+	}
+
+	return events, version, nil
 }
