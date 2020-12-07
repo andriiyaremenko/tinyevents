@@ -11,18 +11,6 @@ import (
 	"github.com/pkg/errors"
 )
 
-type ErrConcurrencyConflict struct {
-	Version         int64
-	ExpectedVersion int64
-	EventType       string
-	EventTopic      string
-}
-
-func (err *ErrConcurrencyConflict) Error() string {
-	return fmt.Sprintf("met concurrency conflict: event %s topic %s version %d, expected version %d",
-		err.EventType, err.EventTopic, err.Version, err.ExpectedVersion)
-}
-
 type Database struct {
 	mu    sync.Mutex
 	table string
@@ -119,7 +107,11 @@ func (d *Database) CreateEvent(eventType, topicID string, data []byte, expectedV
 		}
 
 		if version != expectedVersion {
-			return nil, &ErrConcurrencyConflict{version, expectedVersion, eventType, topic}
+			return nil, &types.ErrConcurrencyConflict{
+				Version:         version,
+				ExpectedVersion: expectedVersion,
+				EventType:       eventType,
+				EventTopic:      topic}
 		}
 
 		found = true
