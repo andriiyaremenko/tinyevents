@@ -12,7 +12,7 @@ import (
 )
 
 type Database struct {
-	mu    sync.Mutex
+	rwM   sync.RWMutex
 	table string
 	db    *sql.DB
 }
@@ -51,8 +51,8 @@ func NewDatabase(driver, connection, table string) (*Database, error) {
 }
 
 func (d *Database) Version(topicID string) (int64, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.rwM.RLock()
+	defer d.rwM.RUnlock()
 
 	query := fmt.Sprintf(
 		"SELECT version FROM %s_topics WHERE id = $1",
@@ -81,8 +81,8 @@ func (d *Database) Version(topicID string) (int64, error) {
 
 func (d *Database) CreateEvent(eventType, topicID string, data []byte, expectedVersion int64) (*types.Event, error) {
 	timeStamp := time.Now().UTC().Unix()
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.rwM.Lock()
+	defer d.rwM.Unlock()
 
 	query := fmt.Sprintf(
 		"SELECT topic, version FROM %s_topics WHERE id = $1",
@@ -152,8 +152,13 @@ func (d *Database) CreateEvent(eventType, topicID string, data []byte, expectedV
 }
 
 func (d *Database) GetEvents(topicID string, eventType string, from int64) ([]types.Event, int64, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.rwM.RLock()
+	defer d.rwM.RUnlock()
+
+	v, err := d.Version(topicID)
+	if err != nil {
+		return nil, 0, errors.Wrap(err, "failed to query events")
+	}
 
 	query := fmt.Sprintf(
 		"SELECT * FROM %s WHERE topicID = $1 and type = $2 and version >= $3 ORDER BY version",
@@ -167,12 +172,22 @@ func (d *Database) GetEvents(topicID string, eventType string, from int64) ([]ty
 
 	defer rows.Close()
 
-	return d.getEvents(rows)
+	events, err := d.getEvents(rows)
+	if err != nil {
+		return nil, 0, errors.Wrap(err, "failed to query events")
+	}
+
+	return events, v, nil
 }
 
 func (d *Database) GetAllEvents(topicID string, from int64) ([]types.Event, int64, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.rwM.RLock()
+	defer d.rwM.RUnlock()
+
+	v, err := d.Version(topicID)
+	if err != nil {
+		return nil, 0, errors.Wrap(err, "failed to query events")
+	}
 
 	query := fmt.Sprintf(
 		"SELECT * FROM %s WHERE topicID = $1 and version >= $2 ORDER BY version",
@@ -186,12 +201,17 @@ func (d *Database) GetAllEvents(topicID string, from int64) ([]types.Event, int6
 
 	defer rows.Close()
 
-	return d.getEvents(rows)
+	events, err := d.getEvents(rows)
+	if err != nil {
+		return nil, 0, errors.Wrap(err, "failed to query events")
+	}
+
+	return events, v, nil
 }
 
 func (d *Database) CreateTopicIfNotExists(topic string) (string, int64, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.rwM.Lock()
+	defer d.rwM.Unlock()
 
 	query := fmt.Sprintf(
 		"SELECT id, version FROM %s_topics WHERE topic = $1",
@@ -235,26 +255,20 @@ func (d *Database) Close() error {
 	return d.db.Close()
 }
 
-func (d *Database) getEvents(rows *sql.Rows) ([]types.Event, int64, error) {
+func (d *Database) getEvents(rows *sql.Rows) ([]types.Event, error) {
 	var events []types.Event
-	var version int64 = 0
-
 	for rows.Next() {
 		event := new(types.RecordedEvent)
 		var data string
 		err := rows.Scan(&event.ID, &event.Type, &event.TopicID, &event.Topic, &data, &event.Version, &event.TimeStamp)
 
 		if err != nil {
-			return nil, 0, errors.Wrap(err, "failed to read events")
+			return nil, errors.Wrap(err, "failed to read events")
 		}
 
 		event.Data = []byte(data)
 		events = append(events, event.Event)
-
-		if version < event.Version {
-			version = event.Version
-		}
 	}
 
-	return events, version, nil
+	return events, nil
 }
